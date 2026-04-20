@@ -146,15 +146,23 @@ Write-up for PA3J
 
 1. Decisoes de Design
 ---------------------
-O cool.cup foi escrito munido de comentarios para auxiliar na compreensao.
+
+O objetivo desta etapa foi implementar o analisador sintatico de COOL em
+Java CUP, produzindo como saida uma arvore de sintaxe abstrata (AST). A
+implementacao ficou concentrada em cool.cup, usando as classes de AST ja
+fornecidas pelo projeto em cool-tree.java. A gramatica foi organizada em
+blocos: programa/classes, features, formais, expressoes, argumentos,
+blocos, case e let.
+
+OBS: Todo o código do cool.cup foi escrito munido de comentários para auxiliar na compreensão!!
 
 1.1 Tipos concretos da AST
 
 O cool-tree.java deste ambiente define as classes concretas da AST com
 nomes como programc, class_c e formalc, que sao diferentes dos nomes
-do esqueleto original. O codigo inicial nao compilava com erros do tipo
+do esqueleto original. O codigo inicial (a primeira tentativa) nao compilava com erros do tipo
 "cannot find symbol: class program". Depois de inspecionar o arquivo
-com grep, ficou claro que o esqueleto usa os nomes abstratos, mas as
+com cat + grep, ficou claro que o esqueleto usa os nomes abstratos, mas as
 acoes semanticas precisam dos tipos concretos:
 
     nonterminal programc program;
@@ -164,6 +172,12 @@ A raiz retornada pela gramatica e sempre um programc, subclasse de
 Program. Nos demais nos, usamos method e attr para features, formalc
 para parametros, branch para cases e as subclasses de Expression para
 expressoes.
+
+A escolha foi declarar os nao-terminais ja com os tipos concretos que as
+acoes semanticas retornam. Por exemplo, class retorna class_c, feat retorna
+Feature, formal retorna Formal e expr retorna Expression. Isso evita casts
+desnecessarios e deixa o verificador de tipos do Java apontar rapidamente
+quando alguma acao semantica retorna o tipo errado.
 
 1.2 Ambiguidade do let
 
@@ -176,6 +190,14 @@ O token ficticio LET_STMT recebeu a menor precedencia, e as producoes
 que contem IN expr usam %prec LET_STMT. Isso faz o corpo do let se
 estender o maximo possivel para a direita, conforme a regra da linguagem.
 
+Exemplo:
+
+    let x : Int <- 1, y : Int in y + x
+
+foi modelado como um let externo para x cujo corpo e outro let para y. O
+ultimo binding e o que recebe o corpo real depois do IN. Essa forma casa
+com a AST disponivel, pois o no let representa apenas um binding por vez.
+
 1.3 Separacao de args e cmd_seq
 
 Embora ambos usem o tipo Expressions na AST, eles representam listas
@@ -184,6 +206,10 @@ por virgula e podendo ser vazio. cmd_seq representa expressoes dentro de
 blocos, separadas por ponto e virgula e com pelo menos uma expressao.
 Essa separacao evita misturar regras com separadores e restricoes
 diferentes.
+
+Essa decisao tambem deixa explicito que f() e valido, pois args pode ser
+vazio, mas {} nao e tratado como bloco valido pela gramatica, pois cmd_seq
+exige pelo menos uma expressao terminada por ponto e virgula.
 
 1.4 Metodo sem parametros
 
@@ -195,20 +221,77 @@ Assim, formal_list fica restrito a listas nao vazias de parametros. Isso
 deixa clara a diferenca entre f() e f(a : Int) e evita adicionar uma
 producao vazia a formal_list.
 
+1.5 Organizacao das regras de gramatica
+
+As classes foram implementadas em duas formas: com heranca explicita
+(INHERITS TYPEID) e sem heranca. Quando nao ha heranca, a acao semantica
+usa Object como pai padrao. A lista de features pode ser vazia, como a
+linguagem permite, ou pode acumular atributos e metodos com appendElement.
+
+As features foram separadas em quatro formas principais: atributo sem
+inicializador, atributo com inicializador, metodo sem parametros e metodo
+com parametros. Atributos sem inicializador usam no_expr na AST. Metodos
+sempre possuem um corpo expr entre chaves, de acordo com a sintaxe de COOL.
+
+As expressoes cobrem atribuicao, dispatch dinamico, dispatch estatico,
+dispatch implicito em self, if, while, bloco, let, case, new, isvoid,
+operadores aritmeticos, comparacoes, not, complemento inteiro, parenteses,
+identificadores e literais. Para dispatch implicito, a acao semantica cria
+um object("self") como receptor, porque a AST de dispatch sempre espera
+uma expressao receptora.
+
+1.6 Precedencia de operadores
+
+As precedencias foram declaradas da menor para a maior prioridade:
+LET_STMT, ASSIGN, NOT, comparacoes, PLUS/MINUS, MULT/DIV, ISVOID, NEG,
+AT e DOT. Essa ordem foi escolhida para refletir a precedencia de COOL e
+para evitar ambiguidades em expressoes compostas. DOT e AT ficaram com as
+maiores precedencias porque dispatch deve agrupar mais fortemente do que
+operadores aritmeticos e comparacoes.
+
 2. Casos de Teste
 -----------------
 
 2.1 good.cl
 
-O arquivo good.cl cobre construcoes validas da gramatica: classes com e
-sem heranca, atributos com e sem inicializador, metodos com zero, um e
-multiplos parametros, atribuicao, blocos, if, while, dispatch dinamico,
-dispatch estatico, chamada implicita em self, let com multiplos bindings,
-case, new, isvoid, not, complemento inteiro, operadores aritmeticos,
-comparacoes, literais e referencias a objetos.
+O arquivo good.cl e a bateria principal de testes validos. Ele nao e um
+hello world: foi escrito para passar por praticamente todas as producoes
+implementadas na gramatica.
+
+Classe A:
+- testa classe sem heranca explicita;
+- testa atributo sem inicializador (x : Int);
+- testa atributos com inicializadores Int, Bool e String;
+- testa metodo sem parametros;
+- testa metodo com um parametro;
+- testa metodo com multiplos parametros;
+- testa bloco com atribuicao e retorno de identificador;
+- testa precedencia entre soma e multiplicacao.
+
+Classe B inherits A:
+- testa classe com heranca;
+- testa atributo inicializado com new;
+- testa dispatch dinamico (a.no_args());
+- testa dispatch estatico (a@A.one_arg(1));
+- testa dispatch explicito em self (self.one_arg(2));
+- testa dispatch implicito em self (one_arg(3));
+- testa if/then/else/fi;
+- testa while/loop/pool;
+- testa let com multiplos bindings, incluindo binding com e sem init;
+- testa case/of/esac com multiplos branches;
+- testa isvoid, not, igualdade, complemento inteiro e parenteses;
+- testa operadores +, -, *, /, <, <= e =.
+
+Classe Main inherits IO:
+- testa heranca de uma classe basica;
+- testa chamada de metodo com argumento string;
+- testa bloco final retornando new B.
 
 Ao executar ./myparser good.cl, o parser gerou uma AST completa com raiz
-_program e sem erros de parsing.
+_program e sem erros de parsing. A saida tambem mostra que as listas foram
+preservadas na ordem correta e que expressoes compostas, como
+~a + (b * 3) / 2 - 1, geraram a estrutura esperada de nos _neg, _mul,
+_divide, _plus e _sub.
 
 2.2 bad.cl
 
@@ -218,12 +301,27 @@ invalido de let e expressoes incompletas dentro de bloco. Tambem contem
 classes validas no inicio e no fim, para mostrar que o parser consegue
 continuar depois dos erros.
 
+Casos incluidos:
+- classe inicial valida A, para garantir que a analise comeca em estado
+  correto;
+- erro em heranca usando parent como OBJECTID no lugar de TYPEID;
+- atributo sem dois-pontos antes do tipo;
+- metodo sem tipo de retorno;
+- let com primeiro binding malformado, seguido de binding valido;
+- bloco com expressoes incompletas x <- ; e 1 + ;, seguido de 3;
+- classe com inherits escrito incorretamente;
+- classe final Recovered, para confirmar que o parser volta a reconhecer
+  codigo valido depois dos erros.
+
 Na execucao, ./myparser bad.cl reportou multiplos erros em linhas
 diferentes e nao parou no primeiro. A mensagem final "Compilation
 halted due to lex and parse errors" e esperada e nao indica problema
 no parser: o driver (Parser.java) encerra com codigo de erro sempre
 que parser.omerrs > 0, o que e o comportamento correto para um arquivo
 com erros sintaticos.
+
+Esses testes cobrem diretamente os quatro pontos de recuperacao exigidos:
+classe, feature, binding de let e expressao dentro de bloco.
 
 3. Corretude e Robustez
 -----------------------
@@ -245,6 +343,10 @@ o que significa que a gramatica esta livre de ambiguidades nao resolvidas.
 
 O parser foi testado com o lexer oficial via myparser. good.cl gera AST
 sem erros e bad.cl demonstra que a recuperacao continua apos cada erro.
+Tambem foram gerados good.output e bad.output para registrar as saidas
+produzidas pelos testes. Como a avaliacao executa codigos COOL corretos
+variados, good.cl foi montado para exercitar varias combinacoes de regras,
+e nao apenas uma classe minima.
 
 4. Tratamento de Erros
 ----------------------
@@ -291,11 +393,24 @@ virgula e continua lendo as expressoes seguintes do bloco. O teste bad.cl
 inclui expressoes incompletas como "x <- ;" e "1 + ;", seguidas por uma
 expressao valida.
 
+O objetivo do tratamento de erro nao e aceitar programas incorretos como
+validos, mas sim reportar mais de um erro por execucao. Por isso bad.cl
+termina com erro, mas mostra que o parser continua operando depois da
+primeira falha.
+
 5. Dificuldades Encontradas
 ---------------------------
 
-A primeira dificuldade foi de entender a logica na documentacao para entender
-como funcionava o parser (a programacao da gramatica no .cup) e como ele deveria ser escrito.
+A primeira dificuldade foi entender a logica do CUP e como traduzir a
+gramatica da linguagem para producoes com acoes semanticas. Diferente de
+um parser escrito manualmente, cada regra precisava retornar exatamente o
+tipo esperado pela AST.
+
+Outra dificuldade foi que o codigo inicial nao compilava. O CUP gerava o
+CoolParser.java, mas o javac reclamava de "cannot find symbol: class
+program" e "cannot find symbol: class class_". Depois de consultar
+cool-tree.java dentro do container, os tipos concretos corretos foram
+identificados e usados em cool.cup.
 
 A ambiguidade do let tambem deu trabalho. A especificacao menciona que o
 coolc resolve com precedencia associada a producoes, mas o mecanismo de
@@ -306,3 +421,20 @@ anotar as producoes com IN expr.
 Por fim, separar args e cmd_seq foi necessario porque tentamos inicialmente
 usar um nao-terminal unico para os dois casos e os conflitos de separador
 (virgula vs ponto e virgula) e restricao de vazio ficaram confusos.
+
+6. Comandos Usados para Validacao
+---------------------------------
+
+Os comandos finais usados no diretorio tp03/PA3 foram:
+
+    make parser
+    ./myparser good.cl
+    ./myparser bad.cl
+    make good.output bad.output
+    make submit-clean
+
+make parser confirmou que o parser compila. ./myparser good.cl confirmou
+que programas corretos geram AST. ./myparser bad.cl confirmou que erros
+sintaticos sao reportados sem parar no primeiro. make good.output
+bad.output registrou as saidas dos testes, e make submit-clean limpou os
+arquivos gerados antes do empacotamento.
